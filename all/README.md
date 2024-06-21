@@ -923,3 +923,107 @@ Plan hash value: 46292687
 ### Vysledek
 
 Cost konecne prijatelny avsak za cenu nulove citelnosti. prvni not in byl to co to zpomalovalo druhy je ekvivalentni tomu jak si to optimalizator preklada.
+
+### 3.4) Prepis NOT EXISTS na LEFT JOIN
+
+```sql
+SELECT DISTINCT k.nazev
+FROM kino k
+         LEFT JOIN (SELECT kino.nazev -- kina co hrali pouze CZ a CSR filmy
+                    FROM kino
+                             JOIN formama9.predstaveni ON kino.id_kino = predstaveni.id_kino
+                             JOIN formama9.film ON film.id_filmu = predstaveni.id_filmu
+                             JOIN formama9.film_zeme ON film.id_filmu = film_zeme.id_filmu
+                             JOIN formama9.zeme ON zeme.zeme_kod = film_zeme.zeme_kod
+                    WHERE zeme.nazev <> 'Česká republika'
+                      AND zeme.nazev <> 'Československo') valid_kino ON valid_kino.nazev = k.nazev
+         LEFT JOIN (SELECT zeme.nazev AS zn, not_in_join.nazev AS nij, not_in_join.pid AS nipd -- kina co hraji vsechny CZ A CSR filmy
+                    FROM zeme
+                             JOIN formama9.film_zeme ON zeme.zeme_kod = film_zeme.zeme_kod
+                             JOIN formama9.film f ON f.id_filmu = film_zeme.id_filmu
+                             LEFT JOIN (SELECT predstaveni.id_kino AS pid, film.nazev
+                                        FROM film
+                                                 JOIN formama9.predstaveni ON film.id_filmu = predstaveni.id_filmu) not_in_join
+                                       ON not_in_join.nazev = f.nazev) not_exists
+                   ON (not_exists.zn = 'Československo' OR not_exists.zn = 'Česká republika')
+                       AND not_exists.nipd is NULL
+                       AND not_exists.nij IS NULL
+         JOIN predstaveni ON k.id_kino = predstaveni.id_kino -- odeber kino co nikdy nic nehralo
+WHERE valid_kino.nazev IS NULL;
+```
+
+### Plan
+
+```
+Plan hash value: 1666469211
+ 
+----------------------------------------------------------------------------------------------------------------
+| Id  | Operation                                   | Name             | Rows  | Bytes | Cost (%CPU)| Time     |
+----------------------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT                            |                  |     1 |    52 |    25   (4)| 00:00:01 |
+|   1 |  HASH UNIQUE                                |                  |     1 |    52 |    25   (4)| 00:00:01 |
+|*  2 |   HASH JOIN SEMI                            |                  |     1 |    52 |    24   (0)| 00:00:01 |
+|   3 |    NESTED LOOPS OUTER                       |                  |     1 |    49 |    21   (0)| 00:00:01 |
+|*  4 |     HASH JOIN ANTI                          |                  |     1 |    49 |    12   (0)| 00:00:01 |
+|   5 |      TABLE ACCESS FULL                      | KINO             |    18 |   468 |     3   (0)| 00:00:01 |
+|   6 |      VIEW                                   |                  |   121 |  2783 |     9   (0)| 00:00:01 |
+|*  7 |       HASH JOIN SEMI                        |                  |   121 |  6534 |     9   (0)| 00:00:01 |
+|*  8 |        HASH JOIN                            |                  |   129 |  5031 |     7   (0)| 00:00:01 |
+|*  9 |         HASH JOIN                           |                  |    70 |  2240 |     6   (0)| 00:00:01 |
+|  10 |          TABLE ACCESS FULL                  | KINO             |    18 |   468 |     3   (0)| 00:00:01 |
+|  11 |          TABLE ACCESS FULL                  | PREDSTAVENI      |    70 |   420 |     3   (0)| 00:00:01 |
+|  12 |         INDEX FULL SCAN                     | FILM_ZEME__IDX   |    51 |   357 |     1   (0)| 00:00:01 |
+|  13 |        VIEW                                 | index$_join$_010 |    14 |   210 |     2   (0)| 00:00:01 |
+|* 14 |         HASH JOIN                           |                  |       |       |            |          |
+|* 15 |          INDEX FAST FULL SCAN               | ZEME_NAZEV_IDX   |    14 |   210 |     1   (0)| 00:00:01 |
+|  16 |          INDEX FAST FULL SCAN               | zeme PK          |    14 |   210 |     1   (0)| 00:00:01 |
+|  17 |     VIEW                                    | VW_LAT_0604E95B  |     1 |       |     9   (0)| 00:00:01 |
+|  18 |      NESTED LOOPS                           |                  |     1 |   158 |     9   (0)| 00:00:01 |
+|  19 |       MERGE JOIN CARTESIAN                  |                  |     2 |   302 |     9   (0)| 00:00:01 |
+|* 20 |        FILTER                               |                  |       |       |            |          |
+|* 21 |         HASH JOIN OUTER                     |                  |     1 |   136 |     7   (0)| 00:00:01 |
+|  22 |          VIEW                               | index$_join$_017 |    30 |   630 |     2   (0)| 00:00:01 |
+|* 23 |           HASH JOIN                         |                  |       |       |            |          |
+|  24 |            INDEX FAST FULL SCAN             | FILM_NAZEV_IDX   |    30 |   630 |     1   (0)| 00:00:01 |
+|  25 |            INDEX FAST FULL SCAN             | film PK          |    30 |   630 |     1   (0)| 00:00:01 |
+|  26 |          VIEW                               |                  |    70 |  8050 |     5   (0)| 00:00:01 |
+|* 27 |           HASH JOIN                         |                  |    70 |  1890 |     5   (0)| 00:00:01 |
+|  28 |            VIEW                             | index$_join$_020 |    30 |   630 |     2   (0)| 00:00:01 |
+|* 29 |             HASH JOIN                       |                  |       |       |            |          |
+|  30 |              INDEX FAST FULL SCAN           | FILM_NAZEV_IDX   |    30 |   630 |     1   (0)| 00:00:01 |
+|  31 |              INDEX FAST FULL SCAN           | film PK          |    30 |   630 |     1   (0)| 00:00:01 |
+|  32 |            TABLE ACCESS FULL                | PREDSTAVENI      |    70 |   420 |     3   (0)| 00:00:01 |
+|  33 |        BUFFER SORT                          |                  |     2 |    30 |     9   (0)| 00:00:01 |
+|  34 |         INLIST ITERATOR                     |                  |       |       |            |          |
+|  35 |          TABLE ACCESS BY INDEX ROWID BATCHED| ZEME             |     2 |    30 |     2   (0)| 00:00:01 |
+|* 36 |           INDEX RANGE SCAN                  | ZEME_NAZEV_IDX   |     2 |       |     1   (0)| 00:00:01 |
+|* 37 |       INDEX UNIQUE SCAN                     | FILM_ZEME__IDX   |     1 |     7 |     0   (0)| 00:00:01 |
+|  38 |    TABLE ACCESS FULL                        | PREDSTAVENI      |    70 |   210 |     3   (0)| 00:00:01 |
+----------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+"   2 - access(""K"".""ID_KINO""=""PREDSTAVENI"".""ID_KINO"")"
+"   4 - access(""VALID_KINO"".""NAZEV""=""K"".""NAZEV"")"
+"   7 - access(""ZEME"".""ZEME_KOD""=""FILM_ZEME"".""ZEME_KOD"")"
+"   8 - access(""PREDSTAVENI"".""ID_FILMU""=""FILM_ZEME"".""ID_FILMU"")"
+"   9 - access(""KINO"".""ID_KINO""=""PREDSTAVENI"".""ID_KINO"")"
+  14 - access(ROWID=ROWID)
+"  15 - filter(""ZEME"".""NAZEV""<>'Československo' AND ""ZEME"".""NAZEV""<>'Česká republika')"
+"  20 - filter(""NOT_IN_JOIN"".""PID"" IS NULL AND ""NOT_IN_JOIN"".""NAZEV"" IS NULL)"
+"  21 - access(""NOT_IN_JOIN"".""NAZEV""(+)=""F"".""NAZEV"")"
+  23 - access(ROWID=ROWID)
+"  27 - access(""FILM"".""ID_FILMU""=""PREDSTAVENI"".""ID_FILMU"")"
+  29 - access(ROWID=ROWID)
+"  36 - access(""ZEME"".""NAZEV""='Československo' OR ""ZEME"".""NAZEV""='Česká republika')"
+"  37 - access(""ZEME"".""ZEME_KOD""=""FILM_ZEME"".""ZEME_KOD"" AND ""F"".""ID_FILMU""=""FILM_ZEME"".""ID_FILMU"")"
+ 
+Note
+-----
+   - dynamic statistics used: dynamic sampling (level=2)
+```
+
+### Vysledek
+
+Ekvivalentni predchozimu Oracle defaultne prepisuje EXISTS a IN na LEFT JOIN.
